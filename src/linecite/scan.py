@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from .config import Config
 from .errors import RefError
@@ -237,13 +238,14 @@ def title_spec(path: str, title: str) -> str:
     return path + (f"::{sym}" if sym else "") + (f" {rest}" if rest else "")
 
 
-def _link(m: re.Match) -> Citation | None:
+def _link(m: re.Match[str]) -> Citation | None:
     url = m.group("url")
     target, _, fragment = url.partition("#")
     frag = FRAGMENT_RE.fullmatch(fragment)
     path = _link_path(target) if frag else None
     if path is None:
         return None
+    assert frag is not None  # path is None whenever frag is
     c = Citation("link", m.start(), m.end())
     title = m.group("title")
     if (
@@ -286,11 +288,11 @@ def _link(m: re.Match) -> Citation | None:
     return c
 
 
-def _part(m: re.Match) -> tuple[int, int]:
+def _part(m: re.Match[str]) -> tuple[int, int]:
     return int(m.group(1)), int(m.group(2) or m.group(1))
 
 
-def _legacy(m: re.Match, syntax: Syntax) -> Citation:
+def _legacy(m: re.Match[str], syntax: Syntax) -> Citation:
     """A number-only citation: `path.ext:12`, `path.ext:7-11,20`, or `310L` for a word suffix."""
     if m.group("pathref"):
         path, _, nums = m.group("pathref").rpartition(":")
@@ -301,7 +303,7 @@ def _legacy(m: re.Match, syntax: Syntax) -> Citation:
         path, nums, at = None, word[: -len(suffix)], m.start()
     slots, ranges = [], []
     for part in re.finditer(r"[^,·]+", nums):
-        ranges.append(_part(PART_RE.fullmatch(part.group(0))))
+        ranges.append(_part(cast("re.Match[str]", PART_RE.fullmatch(part.group(0)))))
         slots.append(Slot(at + part.start(), at + part.end(), part.group(0), "num"))
     return Citation(
         "legacy", m.start(), m.end(), slots=slots, cited=Cited(path, tuple(ranges))
@@ -422,9 +424,9 @@ def scan_file(
 
     if write and edits:
         out, last = [], 0
-        for s, e, new in sorted(edits):
+        for s, end, new in sorted(edits):
             out += [text[last:s], new]
-            last = e
+            last = end
         out.append(text[last:])
         path.write_bytes(
             "".join(out).encode("utf-8")

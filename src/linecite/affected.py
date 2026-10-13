@@ -11,6 +11,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from .config import Config
 from .errors import RefError
@@ -77,7 +78,7 @@ def changed_lines(repo: Repo, rev: str) -> dict[str, set[int]]:
         if line.startswith("+++ "):
             current = _diff_path(line)
         elif line.startswith("@@") and current:
-            m = HUNK_RE.search(line)
+            m = cast("re.Match[str]", HUNK_RE.search(line))
             start, count = int(m.group(1)), int(m.group(2) or 1)
             if count == 0:  # pure deletion between line `start` and `start + 1`
                 out.setdefault(current, set()).update((start, start + 1))
@@ -115,7 +116,7 @@ def affected(files: list[Path], repo: Repo, cfg: Config, rev: str) -> list[Hit]:
             ):
                 continue  # not code, malformed (check reports it), or pinned history that cannot change
             ln = line_of(text, c.start)
-            where = {"source": f, "excerpt": excerpt(text, c.start)}
+            cite_excerpt = excerpt(text, c.start)
             try:
                 target, rest = parse_target(repo, spec)
                 # the whole enclosing symbol counts: a change next to the quoted line can change its meaning;
@@ -124,13 +125,34 @@ def affected(files: list[Path], repo: Repo, cfg: Config, rev: str) -> list[Hit]:
                 if "::" not in spec and rest:
                     _, a, b = resolve(repo, spec)
             except RefError as e:
-                hits.append(Hit(display(f), ln, "", (0, 0), [], str(e), **where))
+                hits.append(
+                    Hit(
+                        display(f),
+                        ln,
+                        "",
+                        (0, 0),
+                        [],
+                        str(e),
+                        source=f,
+                        excerpt=cite_excerpt,
+                    )
+                )
                 continue
             touched = sorted(n for n in changed.get(target.path, ()) if a <= n <= b)
             key = (ln, target.path, a, b)
             if touched and key not in seen:
                 seen.add(key)
-                hits.append(Hit(display(f), ln, target.path, (a, b), touched, **where))
+                hits.append(
+                    Hit(
+                        display(f),
+                        ln,
+                        target.path,
+                        (a, b),
+                        touched,
+                        source=f,
+                        excerpt=cite_excerpt,
+                    )
+                )
     return hits
 
 
@@ -194,5 +216,5 @@ def markdown(
         out.append(
             "\nCitations that no longer resolve (`linecite check` reports them):\n"
         )
-        out += [f"- `{h.doc}:{h.line}`: {format_quote(h.error)}" for h in broken]
+        out += [f"- `{h.doc}:{h.line}`: {format_quote(cast(str, h.error))}" for h in broken]
     return "\n".join(out) + "\n"

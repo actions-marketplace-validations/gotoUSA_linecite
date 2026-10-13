@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from .config import Config
 from .errors import RefError
@@ -197,7 +198,8 @@ class Tracer:
         elif UNKNOWN in statuses:
             t.status = UNKNOWN
         else:
-            t.path, t.spans = new_path, tuple(p.span for p in parts)
+            # every part is ok or stale here, so each has a span
+            t.path, t.spans = new_path, tuple(cast(Span, p.span) for p in parts)
             t.now = renumber(text, c, t.spans)
             moved_file = self._suffix_misses(c.cited.path, new_path)
             if moved_file:
@@ -236,7 +238,8 @@ class Tracer:
             bad = [p for p in ends if p.status == status]
             if bad:
                 return Part(status, note="; ".join(p.note for p in bad))
-        na, nb = ends[0].span[0], ends[1].span[0]
+        # neither end is gone or unknown here, so both have a span
+        na, nb = cast(Span, ends[0].span)[0], cast(Span, ends[1].span)[0]
         if nb < na:
             return Part(UNKNOWN, note=f"the ends of {a}-{b} are now out of order")
         return Part(OK if (na, nb) == span else STALE, (na, nb))

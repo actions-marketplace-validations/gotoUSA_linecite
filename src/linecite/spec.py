@@ -18,6 +18,7 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass
+from typing import cast
 
 from .errors import RefError
 from .repo import Repo, Span
@@ -68,7 +69,7 @@ class Target:
             return self.find(ref.quote, ref.nth)
         if self.sha is None:
             raise RefError(f"integer line {ref.line} on an unpinned spec — use a quote")
-        return ref.line
+        return cast(int, ref.line)  # a pinned spec's parser always sets line or quote
 
 
 def _norm(s: str) -> str:

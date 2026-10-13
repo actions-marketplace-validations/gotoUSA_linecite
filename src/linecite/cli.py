@@ -16,8 +16,11 @@ Documents default to `docs` in the config; the cited code is `code_root` (or --r
 from __future__ import annotations
 
 import argparse
+import io
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 from urllib.parse import quote
 
 from . import __version__
@@ -31,7 +34,7 @@ from .scan import Syntax, display, extract, line_of, scan_files
 from .spec import Naming, describe, render, resolve
 
 
-def _files(args, cfg: Config) -> list[Path]:
+def _files(args: argparse.Namespace, cfg: Config) -> list[Path]:
     files = list(args.files) if getattr(args, "files", None) else cfg.doc_files()
     if not files:
         raise ConfigError(
@@ -43,7 +46,7 @@ def _files(args, cfg: Config) -> list[Path]:
     return files
 
 
-def cmd_check(args, cfg: Config, repo: Repo, write: bool) -> int:
+def cmd_check(args: argparse.Namespace, cfg: Config, repo: Repo, write: bool) -> int:
     found = scan_files(_files(args, cfg), repo, cfg, write)
     if write:
         for line in found.drift:
@@ -61,7 +64,7 @@ def cmd_check(args, cfg: Config, repo: Repo, write: bool) -> int:
     return 1 if (found.broken or found.drift or failing_legacy) else 0
 
 
-def cmd_list(args, cfg: Config, repo: Repo) -> int:
+def cmd_list(args: argparse.Namespace, cfg: Config, repo: Repo) -> int:
     syntax = Syntax(cfg)
     for f in _files(args, cfg):
         text = f.read_bytes().decode("utf-8")
@@ -88,7 +91,7 @@ def cmd_list(args, cfg: Config, repo: Repo) -> int:
     return 0
 
 
-def cmd_where(args, repo: Repo) -> int:
+def cmd_where(args: argparse.Namespace, repo: Repo) -> int:
     t, a, b = resolve(repo, args.spec)
     print(f"{t.path}{' @' + t.sha if t.sha else ''}: {render(a, b)}")
     for n in range(a, min(b, a + 40) + 1):
@@ -96,7 +99,7 @@ def cmd_where(args, repo: Repo) -> int:
     return 0
 
 
-def cmd_locate(args, repo: Repo) -> int:
+def cmd_locate(args: argparse.Namespace, repo: Repo) -> int:
     sha = args.at
     path = repo.resolve_path(args.path, sha)
     lines = repo.source_lines(path, sha)
@@ -121,7 +124,7 @@ def cmd_locate(args, repo: Repo) -> int:
     return 0
 
 
-def doc_link(link_base: str | None):
+def doc_link(link_base: str | None) -> Callable[[Hit], str | None]:
     """URL of a hit's doc line under LINK_BASE (a blob URL of the docs repository at the checked-out commit)."""
     if not link_base:
         return lambda h: None
@@ -132,7 +135,8 @@ def doc_link(link_base: str | None):
 
     def link(h: Hit) -> str | None:
         try:
-            rel = h.source.resolve().relative_to(top).as_posix()
+            # affected() sets the source document on every hit
+            rel = cast(Path, h.source).resolve().relative_to(top).as_posix()
         except ValueError:
             return None
         # ?plain=1: rendered markdown has no line anchors; GitHub and GitLab show the source for it
@@ -141,7 +145,7 @@ def doc_link(link_base: str | None):
     return link
 
 
-def cmd_affected(args, cfg: Config, repo: Repo) -> int:
+def cmd_affected(args: argparse.Namespace, cfg: Config, repo: Repo) -> int:
     hits = affected(_files(args, cfg), repo, cfg, args.rev)
     if args.format == "markdown":
         print(markdown(hits, args.rev, doc_link(args.link_base)), end="")
@@ -176,7 +180,7 @@ def _tally(traced: list[Traced]) -> str:
     return f"number-only citations {len(traced)} · {counts}"
 
 
-def cmd_audit(args, cfg: Config, repo: Repo) -> int:
+def cmd_audit(args: argparse.Namespace, cfg: Config, repo: Repo) -> int:
     traced = audit(_files(args, cfg), repo, cfg)
     for t in traced:
         print(_traced_row(t))
@@ -192,7 +196,7 @@ def cmd_audit(args, cfg: Config, repo: Repo) -> int:
     return 1 if any(t.status in (STALE, GONE) for t in traced) else 0
 
 
-def cmd_adopt(args, cfg: Config, repo: Repo) -> int:
+def cmd_adopt(args: argparse.Namespace, cfg: Config, repo: Repo) -> int:
     plans = plan(_files(args, cfg), repo, cfg)
     converted: list[Traced] = []
     left = 0
@@ -291,7 +295,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(args, cfg: Config, repo: Repo) -> int:
+def run(args: argparse.Namespace, cfg: Config, repo: Repo) -> int:
     if args.cmd in ("check", "sync"):
         return cmd_check(args, cfg, repo, write=args.cmd == "sync")
     commands = {
@@ -311,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr,
     ):  # paths and quoted code are rarely ASCII-only
         try:
-            stream.reconfigure(encoding="utf-8")
+            cast(io.TextIOWrapper, stream).reconfigure(encoding="utf-8")
         except (AttributeError, ValueError):
             pass
     args = build_parser().parse_args(argv)
