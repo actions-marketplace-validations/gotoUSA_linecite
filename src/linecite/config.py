@@ -17,6 +17,7 @@ import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .errors import ConfigError
 
@@ -57,17 +58,20 @@ class Config:
         return list(seen)
 
 
-def _section(path: Path) -> dict | None:
+def _section(path: Path) -> dict[str, Any] | None:
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: {e}") from e
+    section: dict[str, Any] | None
     if path.name == "pyproject.toml":
-        return data.get("tool", {}).get("linecite")
-    return data.get("tool", {}).get("linecite", data)
+        section = data.get("tool", {}).get("linecite")
+    else:
+        section = data.get("tool", {}).get("linecite", data)
+    return section
 
 
-def _strings(data: dict, key: str, where: Path) -> tuple[str, ...] | None:
+def _strings(data: dict[str, Any], key: str, where: Path | None) -> tuple[str, ...] | None:
     if key not in data:
         return None
     value = data[key]
@@ -77,7 +81,7 @@ def _strings(data: dict, key: str, where: Path) -> tuple[str, ...] | None:
 
 
 def load(config_path: Path | None, root_override: Path | None, cwd: Path) -> Config:
-    data: dict = {}
+    data: dict[str, Any] = {}
     base = cwd
     source = None
     if config_path is not None:

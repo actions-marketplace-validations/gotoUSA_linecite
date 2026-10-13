@@ -9,6 +9,7 @@ import subprocess
 import threading
 import warnings
 from pathlib import Path
+from typing import cast
 
 from .errors import RefError
 
@@ -35,7 +36,7 @@ class _Blobs:
 
     def __init__(self, root: Path):
         self.root = root
-        self.proc: subprocess.Popen | None = None
+        self.proc: subprocess.Popen[bytes] | None = None
         self.lock = threading.Lock()
 
     def read(self, rev_path: str) -> bytes | None:
@@ -49,18 +50,21 @@ class _Blobs:
                     stderr=subprocess.DEVNULL,
                     env=GIT_ENV,
                 )
-            self.proc.stdin.write(rev_path.encode("utf-8") + b"\n")
-            self.proc.stdin.flush()
-            header = self.proc.stdout.readline().split()
+            stdin, stdout = self.proc.stdin, self.proc.stdout
+            assert stdin is not None and stdout is not None  # both opened with PIPE
+            stdin.write(rev_path.encode("utf-8") + b"\n")
+            stdin.flush()
+            header = stdout.readline().split()
             if len(header) != 3:  # "<name> missing" / "<name> ambiguous"
                 return None
-            data = self.proc.stdout.read(int(header[2]))
-            self.proc.stdout.read(1)  # the newline after the content
+            data = stdout.read(int(header[2]))
+            stdout.read(1)  # the newline after the content
             return data if header[1] == b"blob" else None
 
     def close(self) -> None:
         with self.lock:
             if self.proc is not None:
+                assert self.proc.stdin is not None  # opened with PIPE
                 self.proc.stdin.close()
                 self.proc.wait()
                 self.proc = None
@@ -150,6 +154,7 @@ class Repo:
     def source_lines(self, path: str, sha: str | None) -> tuple[str, ...]:
         key = (path, sha)
         if key not in self._lines:
+            data: bytes | None
             if sha is None:
                 data = (self.root / path).read_bytes()
             else:
@@ -245,7 +250,9 @@ class Repo:
                 ) from e
             out: dict[str, Span] = {}
 
-            def visit(body, prefix, in_function=False):
+            def visit(
+                body: list[ast.stmt], prefix: str, in_function: bool = False
+            ) -> None:
                 for node in body:
                     if isinstance(
                         node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -254,7 +261,8 @@ class Repo:
                             [node.lineno] + [d.lineno for d in node.decorator_list]
                         )
                         name = prefix + node.name
-                        out[name] = (start, node.end_lineno)
+                        # ast.parse sets end_lineno on every statement
+                        out[name] = (start, cast(int, node.end_lineno))
                         visit(
                             node.body,
                             name + ".",
@@ -271,7 +279,10 @@ class Repo:
                         )
                         for t in targets:
                             if isinstance(t, ast.Name):
-                                out[prefix + t.id] = (node.lineno, node.end_lineno)
+                                out[prefix + t.id] = (
+                                    node.lineno,
+                                    cast(int, node.end_lineno),
+                                )
 
             visit(tree.body, "")
             self._symbols[key] = out

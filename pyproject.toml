@@ -32,7 +32,7 @@ Source = "https://github.com/gotoUSA/linecite"
 Issues = "https://github.com/gotoUSA/linecite/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pre-commit>=3"]
+dev = ["pytest>=8", "pre-commit>=3", "mypy>=2.4"]
 
 [project.scripts]
 linecite = "linecite.cli:main"
@@ -42,6 +42,11 @@ packages = ["src/linecite"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+files = ["src/linecite"]
+strict = true
+python_version = "3.11"  # the oldest supported Python
 
 # linecite checks its own docs
 [tool.linecite]

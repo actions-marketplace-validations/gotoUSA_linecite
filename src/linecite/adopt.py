@@ -17,12 +17,13 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from .audit import OK, STALE, Traced, Tracer, number_only, renumber
 from .config import Config
 from .errors import RefError
 from .repo import Repo
-from .scan import MARKDOWN_SUFFIXES, Syntax, code_spans, extract, line_of
+from .scan import MARKDOWN_SUFFIXES, Cited, Syntax, code_spans, extract, line_of
 from .spec import describe, resolve
 
 # [bracketed text] on one line, one level of nesting: link texts (inline or reference-style) and the like
@@ -135,7 +136,8 @@ def propose(d: _Doc, t: Traced, repo: Repo, syntax: Syntax) -> Proposal:
     if len(t.spans) != 1:
         raise RefError("a list of lines: give each line its own citation first")
     (a, b), c, text = t.spans[0], t.citation, d.text
-    naming = describe(repo, t.path, a, b)
+    path = cast(str, t.path)  # set whenever the status is ok or stale
+    naming = describe(repo, path, a, b)
     frag = f"#L{a}" if a == b else f"#L{a}-L{b}"
     title = title_attr(naming.title(), _line_at(text, c.start).lstrip().startswith("|"))
     start, end = c.start, c.end
@@ -145,11 +147,12 @@ def propose(d: _Doc, t: Traced, repo: Repo, syntax: Syntax) -> Proposal:
         body, _, url = renumber(text, c, t.spans)[1:].partition("](")
         url = url.partition("#")[0]
         try:
-            same_file = repo.resolve_path(c.cited.path, None) == t.path
+            cited = cast(Cited, c.cited)  # a bare link always carries what it cites
+            same_file = repo.resolve_path(cast(str, cited.path), None) == path
         except RefError:
             same_file = False
         if not same_file:
-            url = link_url(d.path, repo, t.path)
+            url = link_url(d.path, repo, path)
         new = f"[{body}]({url}{frag} {title})"
     elif d.path.suffix.lower() in MARKDOWN_SUFFIXES:
         if _within(c.start, d.brackets):
@@ -157,7 +160,7 @@ def propose(d: _Doc, t: Traced, repo: Repo, syntax: Syntax) -> Proposal:
         # a link inside inline code renders as literal text: the whole code span becomes the link text
         start, end = _within(c.start, d.code) or (start, end)
         label = text[start : c.start] + t.now + text[c.end : end]
-        new = f"[{label}]({link_url(d.path, repo, t.path)}{frag} {title})"
+        new = f"[{label}]({link_url(d.path, repo, path)}{frag} {title})"
     else:
         spec = naming.spec()
         if "-->" in spec:
